@@ -215,7 +215,7 @@ grep -q "^snd-soc-ac108$" /etc/modules || \
 grep -q "^snd-soc-wm8960$" /etc/modules || \
   echo "snd-soc-wm8960" >> /etc/modules
 grep -q "^snd-soc-wm8960-soundcard$" /etc/modules || \
-  echo "snd-soc-wm8960-soundcard" >> /etc/modules  
+  echo "snd-soc-wm8960-soundcard" >> /etc/modules
 
 #set dtoverlays
 CONFIG=/boot/config.txt

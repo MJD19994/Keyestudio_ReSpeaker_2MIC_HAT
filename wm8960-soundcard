@@ -16,8 +16,8 @@ do
         dtoverlay wm8960-soundcard
         sleep 1
 
-        rm /etc/asound.conf
-        rm /var/lib/alsa/asound.state
+        rm -f /etc/asound.conf
+        rm -f /var/lib/alsa/asound.state
 
         echo "create wm8960-soundcard configure file"
         ln -s /etc/wm8960-soundcard/asound.conf /etc/asound.conf
