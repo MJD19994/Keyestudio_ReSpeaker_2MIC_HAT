@@ -52,6 +52,11 @@ if [ $errorFound = 1 ] ; then
   exit 1
 fi
 
+echo "------------------------------------------------------"
+echo "Keyestudio ReSpeaker 2MIC HAT Driver Installation"
+echo "Supporting Raspberry Pi OS Trixie (Kernel 6.12+)"
+echo "------------------------------------------------------"
+
 ver="0.3"
 uname_r=$(uname -r)
 
@@ -123,6 +128,32 @@ if [[ $? -eq 0 ]]; then
   pacman -Syu --needed git gcc automake make dkms linux-raspberrypi-headers i2c-tools
 fi
 
+echo "------------------------------------------------------"
+echo "Cleaning up old/conflicting drivers..."
+echo "------------------------------------------------------"
+
+# Blacklist the old simple-card driver to prevent conflicts
+if ! grep -q "blacklist snd_soc_simple_card" /etc/modprobe.d/blacklist.conf 2>/dev/null; then
+  echo "blacklist snd_soc_simple_card" >> /etc/modprobe.d/blacklist.conf
+  echo "Blacklisted snd_soc_simple_card module"
+fi
+
+# Remove old seeed-voicecard modules if present
+if lsmod | grep -q "snd_soc_seeed_voicecard"; then
+  echo "Removing old seeed-voicecard modules..."
+  rmmod snd_soc_seeed_voicecard 2>/dev/null || true
+fi
+
+# Clean up old installations
+for mod in seeed-voicecard wm8960-soundcard; do
+  if [[ -e /var/lib/dkms/$mod ]]; then
+    echo "Removing old $mod installations..."
+    dkms remove --force -m $mod --all 2>/dev/null || true
+    rm -rf /var/lib/dkms/$mod 2>/dev/null || true
+    rm -rf /usr/src/$mod-* 2>/dev/null || true
+  fi
+done
+
 # locate currently installed kernels (may be different to running kernel if
 # it's just been updated)
 base_ver=$(get_kernel_version)
@@ -158,13 +189,18 @@ function install_module {
   mkdir -p /var/lib/dkms/$mod/$ver/$marker
 }
 
-install_module "./" "seeed-voicecard"
+echo "------------------------------------------------------"
+echo "Installing kernel modules..."
+echo "------------------------------------------------------"
 
+# Install both seeed-voicecard (for AC108 support) and wm8960-soundcard
+install_module "./" "seeed-voicecard"
 
 # install dtbos
 cp seeed-2mic-voicecard.dtbo $OVERLAYS
 cp seeed-4mic-voicecard.dtbo $OVERLAYS
 cp seeed-8mic-voicecard.dtbo $OVERLAYS
+cp wm8960-soundcard.dtbo $OVERLAYS
 
 #install alsa plugins
 # no need this plugin now
@@ -177,7 +213,9 @@ grep -q "^snd-soc-seeed-voicecard$" /etc/modules || \
 grep -q "^snd-soc-ac108$" /etc/modules || \
   echo "snd-soc-ac108" >> /etc/modules
 grep -q "^snd-soc-wm8960$" /etc/modules || \
-  echo "snd-soc-wm8960" >> /etc/modules  
+  echo "snd-soc-wm8960" >> /etc/modules
+grep -q "^snd-soc-wm8960-soundcard$" /etc/modules || \
+  echo "snd-soc-wm8960-soundcard" >> /etc/modules  
 
 #set dtoverlays
 CONFIG=/boot/config.txt
@@ -213,10 +251,25 @@ git --git-dir=/etc/voicecard/.git --work-tree=/etc/voicecard/ commit  -m "origin
 
 cp seeed-voicecard /usr/bin/
 cp seeed-voicecard.service /lib/systemd/system/
+chmod 644 /lib/systemd/system/seeed-voicecard.service
 systemctl enable  seeed-voicecard.service 
 systemctl start   seeed-voicecard
 
 echo "------------------------------------------------------"
+echo "Installation completed successfully!"
+echo "Kernel: $uname_r"
+echo "Installed modules:"
+echo "  - seeed-voicecard (AC108, WM8960 support)"
+echo "  - wm8960-soundcard (Kernel 6.12+ compatible WM8960)"
+echo ""
+echo "Device tree overlays installed:"
+echo "  - seeed-2mic-voicecard.dtbo"
+echo "  - seeed-4mic-voicecard.dtbo"
+echo "  - seeed-8mic-voicecard.dtbo"
+echo "  - wm8960-soundcard.dtbo"
+echo "------------------------------------------------------"
 echo "Please reboot your raspberry pi to apply all settings"
+echo "After reboot, test with:"
+echo "  arecord -D hw:1,0 -r 16000 -c 2 -f S16_LE -t wav test.wav"
 echo "Enjoy!"
 echo "------------------------------------------------------"
