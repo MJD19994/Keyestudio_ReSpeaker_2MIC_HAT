@@ -1,8 +1,8 @@
 #
-# Peter Yang <turmary@126.com>
-# Copyright (c) 2019 Seeed Studio
-#
-# MIT License
+# WM8960 Soundcard Driver Makefile
+# Copyright (c) 2024
+# 
+# Kernel 6.12+ compatible version
 #
 
 uname_r=$(shell uname -r)
@@ -10,24 +10,19 @@ uname_r=$(shell uname -r)
 # If KERNELRELEASE is defined, we've been invoked from the
 # kernel build system and can use its language
 ifneq ($(KERNELRELEASE),)
-# $(warning KERNELVERSION=$(KERNELVERSION))
 
+# Build only kernel 6.12 compatible modules
 snd-soc-wm8960-objs := wm8960.o
-snd-soc-ac108-objs := ac108.o ac101.o
-snd-soc-seeed-voicecard-objs := seeed-voicecard.o
-
+snd-soc-wm8960-soundcard-objs := wm8960-soundcard.o
 
 obj-m += snd-soc-wm8960.o
-obj-m += snd-soc-ac108.o
-obj-m += snd-soc-seeed-voicecard.o
+obj-m += snd-soc-wm8960-soundcard.o
 
 ifdef DEBUG
 ifneq ($(DEBUG),0)
-	ccflags-y += -DDEBUG -DAC101_DEBG
+	ccflags-y += -DDEBUG
 endif
 endif
-
-
 
 else
 
@@ -40,11 +35,11 @@ clean:
 	make -C /lib/modules/$(uname_r)/build M=$(PWD) clean
 
 install:
-	sudo cp snd-soc-ac108.ko ${DEST}/sound/soc/codecs/
+	sudo mkdir -p ${DEST}/sound/soc/codecs/
+	sudo mkdir -p ${DEST}/sound/soc/bcm/
 	sudo cp snd-soc-wm8960.ko ${DEST}/sound/soc/codecs/
-	sudo cp snd-soc-seeed-voicecard.ko ${DEST}/sound/soc/bcm/
+	sudo cp snd-soc-wm8960-soundcard.ko ${DEST}/sound/soc/bcm/
 	sudo depmod -a
-
 
 .PHONY: all clean install
 

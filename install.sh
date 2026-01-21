@@ -1,222 +1,240 @@
 #!/bin/bash
+#
+# WM8960 Soundcard Installation Script
+# For Raspberry Pi OS Trixie (Kernel 6.12+)
+# Copyright (c) 2024
+#
 
+set -e
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}WM8960 Soundcard Installation Script${NC}"
+echo -e "${GREEN}For Raspberry Pi OS Trixie (Kernel 6.12+)${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo ""
+
+# Check if running as root
 if [[ $EUID -ne 0 ]]; then
-   echo "This script must be run as root (use sudo)" 1>&2
+   echo -e "${RED}Error: This script must be run as root (use sudo)${NC}" 1>&2
    exit 1
 fi
 
+# Detect config and overlays directories
+CONFIG=/boot/config.txt
+OVERLAYS=/boot/overlays
+[ -f /boot/firmware/config.txt ] && CONFIG=/boot/firmware/config.txt
+[ -f /boot/firmware/usercfg.txt ] && CONFIG=/boot/firmware/usercfg.txt
+[ -d /boot/firmware/overlays ] && OVERLAYS=/boot/firmware/overlays
+
+echo -e "${YELLOW}Using config file: ${CONFIG}${NC}"
+echo -e "${YELLOW}Using overlays directory: ${OVERLAYS}${NC}"
+echo ""
+
+# Check for required directories
+if [ ! -d "$OVERLAYS" ]; then
+  echo -e "${RED}Error: $OVERLAYS not found or not a directory${NC}" 1>&2
+  exit 1
+fi
+
 # Check for enough space on /boot volume
-boot_line=$(df -h | grep /boot | head -n 1)
-if [ "x${boot_line}" = "x" ]; then
-  echo "Warning: /boot volume not found .."
-else
+boot_line=$(df -h | grep -E '/boot|/boot/firmware' | head -n 1)
+if [ "x${boot_line}" != "x" ]; then
   boot_space=$(echo $boot_line | awk '{print $4;}')
   free_space=$(echo "${boot_space%?}")
   unit="${boot_space: -1}"
   if [[ "$unit" = "K" ]]; then
-    echo "Error: Not enough space left ($boot_space) on /boot"
+    echo -e "${RED}Error: Not enough space left ($boot_space) on /boot${NC}"
     exit 1
   elif [[ "$unit" = "M" ]]; then
     if [ "$free_space" -lt "25" ]; then
-      echo "Error: Not enough space left ($boot_space) on /boot"
+      echo -e "${RED}Error: Not enough space left ($boot_space) on /boot${NC}"
       exit 1
     fi
   fi
 fi
 
-#
-# make sure that we are on something ARM/Raspberry related
-# either a bare metal Raspberry or a qemu session with 
-# Raspberry stuff available
-# - check for /boot/overlays
-# - dtparam and dtoverlay is available
-errorFound=0
-OVERLAYS=/boot/overlays
-[ -d /boot/firmware/overlays ] && OVERLAYS=/boot/firmware/overlays
-
-if [ ! -d $OVERLAYS ] ; then
-  echo "$OVERLAYS not found or not a directory" 1>&2
-  errorFound=1
-fi
-# should we also check for alsactl and amixer used in seeed-voicecard?
-PATH=$PATH:/opt/vc/bin
-for cmd in dtparam dtoverlay ; do
-  if ! which $cmd &>/dev/null ; then
-    echo "$cmd not found" 1>&2
-    echo "You may need to run ./ubuntu-prerequisite.sh"
-    errorFound=1
-  fi
-done
-if [ $errorFound = 1 ] ; then
-  echo "Errors found, exiting." 1>&2
-  exit 1
-fi
-
-ver="0.3"
+# Get kernel version
 uname_r=$(uname -r)
+echo -e "${GREEN}Detected kernel version: ${uname_r}${NC}"
+echo ""
 
-# we create a dir with this version to ensure that 'dkms remove' won't delete
-# the sources during kernel updates
-marker="0.0.0"
+# Update and install required packages
+echo -e "${YELLOW}Installing required packages...${NC}"
+apt-get update -y
+apt-get install -y dkms git i2c-tools device-tree-compiler
 
-_VER_RUN=
-function get_kernel_version() {
-  local ZIMAGE IMG_OFFSET
+# Install kernel headers
+echo -e "${YELLOW}Installing kernel headers...${NC}"
+apt-get install -y raspberrypi-kernel-headers linux-headers-${uname_r} 2>/dev/null || \
+apt-get install -y raspberrypi-kernel-headers 2>/dev/null || \
+echo -e "${YELLOW}Warning: Could not install kernel headers package, using existing headers${NC}"
 
-  _VER_RUN=""
-  [ -z "$_VER_RUN" ] && {
-    ZIMAGE=/boot/kernel.img
-    [ -f /boot/firmware/vmlinuz ] && ZIMAGE=/boot/firmware/vmlinuz
-    # 64-bit-only kernel package
-    [ ! -f /boot/kernel.img ] && [ -f /boot/kernel8.img ] && ZIMAGE=/boot/kernel8.img
-    IMG_OFFSET=$(LC_ALL=C grep -abo $'\x1f\x8b\x08\x00' $ZIMAGE | head -n 1 | cut -d ':' -f 1)
-    _VER_RUN=$(dd if=$ZIMAGE obs=64K ibs=4 skip=$(( IMG_OFFSET / 4)) 2>/dev/null | zcat | grep -a -m1 "Linux version" | LC_ALL=C sed -e 's/^.*Linux/Linux/' | strings | awk '{ print $3; }')
-  }
-  echo "$_VER_RUN"
-  return 0
-}
-
-function check_kernel_headers() {
-  VER_RUN=$(get_kernel_version)
-  VER_HDR=$(dpkg -L raspberrypi-kernel-headers | egrep -m1 "/lib/modules/[^-]+/build" | awk -F'/' '{ print $4; }')
-  [ "X$VER_RUN" == "X$VER_HDR" ] && {
-    return 0
-  }
-  VER_HDR=$(dpkg -L linux-headers-$VER_RUN | egrep -m1 "/lib/modules/[[:print:]]+/build" | awk -F'/' '{ print $4; }')
-  [ "X$VER_RUN" == "X$VER_HDR" ] && {
-    return 0
-  }
-
-  # echo RUN=$VER_RUN HDR=$VER_HDR
-  echo " !!! Your kernel version is $VER_RUN"
-  echo "     Not found *** corresponding *** kernel headers with apt-get."
-  echo "     This may occur if you have ran 'rpi-update'."
-  echo " Choose  *** y *** will revert the kernel to version $VER_HDR then continue."
-  echo " Choose  *** N *** will exit without this driver support, by default."
-  read -p "Would you like to proceed? (y/N)" -n 1 -r -s
-  echo
-  if ! [[ $REPLY =~ ^[Yy]$ ]]; then
-    exit 1;
-  fi
-
-  apt-get -y --reinstall install raspberrypi-kernel
-}
-
-# update and install required packages
-which apt &>/dev/null
-if [[ $? -eq 0 ]]; then
-  apt update -y
-  # Raspbian kernel packages
-  apt-get -y install raspberrypi-kernel-headers raspberrypi-kernel 
-  # Recent Raspbian has 64-bit kernel on 32-bit userspace
-  apt-get -y install gcc-aarch64-linux-gnu
-  # Ubuntu kernel packages
-  apt-get -y install linux-raspi linux-headers-raspi linux-image-raspi
-  apt-get -y install dkms git i2c-tools libasound2-plugins
-  # rpi-update checker
-  check_kernel_headers
+# Verify kernel headers are available
+if [ ! -d "/lib/modules/${uname_r}/build" ]; then
+    echo -e "${RED}Error: Kernel headers not found at /lib/modules/${uname_r}/build${NC}"
+    echo -e "${RED}Please install appropriate kernel headers for your kernel version${NC}"
+    exit 1
 fi
 
-# Arch Linux
-which pacman &>/dev/null
-if [[ $? -eq 0 ]]; then
-  pacman -Syu --needed git gcc automake make dkms linux-raspberrypi-headers i2c-tools
+echo -e "${GREEN}Kernel headers found${NC}"
+echo ""
+
+# Build device tree overlay
+echo -e "${YELLOW}Building device tree overlay...${NC}"
+if [ -f "wm8960-soundcard-overlay.dts" ]; then
+    dtc -@ -H epapr -O dtb -o wm8960-soundcard.dtbo wm8960-soundcard-overlay.dts
+    if [ $? -eq 0 ]; then
+        echo -e "${GREEN}Successfully built wm8960-soundcard.dtbo${NC}"
+    else
+        echo -e "${RED}Error: Failed to build device tree overlay${NC}"
+        exit 1
+    fi
+else
+    echo -e "${RED}Error: wm8960-soundcard-overlay.dts not found${NC}"
+    exit 1
+fi
+echo ""
+
+# Install device tree overlay
+echo -e "${YELLOW}Installing device tree overlay...${NC}"
+cp -v wm8960-soundcard.dtbo $OVERLAYS/
+echo -e "${GREEN}Device tree overlay installed${NC}"
+echo ""
+
+# Setup DKMS
+ver="1.0"
+mod="wm8960-soundcard"
+marker="installed"
+
+echo -e "${YELLOW}Setting up DKMS for kernel modules...${NC}"
+
+# Remove old DKMS installations if they exist
+if [ -e "/usr/src/${mod}-${ver}" ] || [ -e "/var/lib/dkms/${mod}/${ver}" ]; then
+    echo "Removing old DKMS installation..."
+    dkms remove -m ${mod} -v ${ver} --all 2>/dev/null || true
+    rm -rf /usr/src/${mod}-${ver}
 fi
 
-# locate currently installed kernels (may be different to running kernel if
-# it's just been updated)
-base_ver=$(get_kernel_version)
-base_ver=${base_ver%%[-+]*}
-#kernels="${base_ver}+ ${base_ver}-v7+ ${base_ver}-v7l+"
-kernels=$(uname -r)
-
-function install_module {
-  local _i
-
-  src=$1
-  mod=$2
-
-  if [[ -d /var/lib/dkms/$mod/$ver/$marker ]]; then
-    rmdir /var/lib/dkms/$mod/$ver/$marker
-  fi
-
-  if [[ -e /usr/src/$mod-$ver || -e /var/lib/dkms/$mod/$ver ]]; then
-    dkms remove --force -m $mod -v $ver --all
-    rm -rf /usr/src/$mod-$ver
-  fi
-
-  mkdir -p /usr/src/$mod-$ver
-  cp -a $src/* /usr/src/$mod-$ver/
-
-  dkms add -m $mod -v $ver
-  for _i in $kernels; do
-    dkms build -k $_i -m $mod -v $ver && {
-      dkms install --force -k $_i -m $mod -v $ver
-    }
-  done
-
-  mkdir -p /var/lib/dkms/$mod/$ver/$marker
-}
-
-install_module "./" "seeed-voicecard"
-
-
-# install dtbos
-cp seeed-2mic-voicecard.dtbo $OVERLAYS
-cp seeed-4mic-voicecard.dtbo $OVERLAYS
-cp seeed-8mic-voicecard.dtbo $OVERLAYS
-
-#install alsa plugins
-# no need this plugin now
-# install -D ac108_plugin/libasound_module_pcm_ac108.so /usr/lib/arm-linux-gnueabihf/alsa-lib/
-rm -f /usr/lib/arm-linux-gnueabihf/alsa-lib/libasound_module_pcm_ac108.so
-
-#set kernel modules
-grep -q "^snd-soc-seeed-voicecard$" /etc/modules || \
-  echo "snd-soc-seeed-voicecard" >> /etc/modules
-grep -q "^snd-soc-ac108$" /etc/modules || \
-  echo "snd-soc-ac108" >> /etc/modules
-grep -q "^snd-soc-wm8960$" /etc/modules || \
-  echo "snd-soc-wm8960" >> /etc/modules  
-
-#set dtoverlays
-CONFIG=/boot/config.txt
-[ -f /boot/firmware/usercfg.txt ] && CONFIG=/boot/firmware/usercfg.txt
-
-sed -i -e 's:#dtparam=i2c_arm=on:dtparam=i2c_arm=on:g'  $CONFIG || true
-grep -q "^dtoverlay=i2s-mmap$" $CONFIG || \
-  echo "dtoverlay=i2s-mmap" >> $CONFIG
-
-
-grep -q "^dtparam=i2s=on$" $CONFIG || \
-  echo "dtparam=i2s=on" >> $CONFIG
-
-#install config files
-mkdir /etc/voicecard || true
-cp *.conf /etc/voicecard
-cp *.state /etc/voicecard
-
-#create git repo
-git_email=$(git config --global --get user.email)
-git_name=$(git config --global --get user.name)
-if [ "x${git_email}" == "x" ] || [ "x${git_name}" == "x" ] ; then
-    echo "setup git config"
-    git config --global user.email "respeaker@seeed.cc"
-    git config --global user.name "respeaker"
+# Also remove old seeed-voicecard if it exists
+if [ -e "/usr/src/seeed-voicecard-0.3" ] || [ -e "/var/lib/dkms/seeed-voicecard/0.3" ]; then
+    echo "Removing old seeed-voicecard DKMS installation..."
+    dkms remove -m seeed-voicecard -v 0.3 --all 2>/dev/null || true
+    rm -rf /usr/src/seeed-voicecard-0.3
 fi
-echo "git init"
-git --git-dir=/etc/voicecard/.git init
-echo "git add --all"
-git --git-dir=/etc/voicecard/.git --work-tree=/etc/voicecard/ add --all
-echo "git commit -m \"origin configures\""
-git --git-dir=/etc/voicecard/.git --work-tree=/etc/voicecard/ commit  -m "origin configures"
 
-cp seeed-voicecard /usr/bin/
-cp seeed-voicecard.service /lib/systemd/system/
-systemctl enable  seeed-voicecard.service 
-systemctl start   seeed-voicecard
+# Create DKMS source directory
+mkdir -p /usr/src/${mod}-${ver}
 
-echo "------------------------------------------------------"
-echo "Please reboot your raspberry pi to apply all settings"
-echo "Enjoy!"
-echo "------------------------------------------------------"
+# Copy only required source files for kernel 6.12+ compatible modules
+echo "Copying source files..."
+cp -v wm8960.c /usr/src/${mod}-${ver}/
+cp -v wm8960.h /usr/src/${mod}-${ver}/
+cp -v wm8960-soundcard.c /usr/src/${mod}-${ver}/
+cp -v Makefile /usr/src/${mod}-${ver}/
+cp -v dkms.conf /usr/src/${mod}-${ver}/
+
+# Add module to DKMS
+echo "Adding module to DKMS..."
+dkms add -m ${mod} -v ${ver}
+
+# Build module with DKMS
+echo "Building modules with DKMS..."
+dkms build -k ${uname_r} -m ${mod} -v ${ver}
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: DKMS build failed${NC}"
+    exit 1
+fi
+
+# Install module with DKMS
+echo "Installing modules with DKMS..."
+dkms install --force -k ${uname_r} -m ${mod} -v ${ver}
+if [ $? -ne 0 ]; then
+    echo -e "${RED}Error: DKMS install failed${NC}"
+    exit 1
+fi
+
+echo -e "${GREEN}DKMS modules built and installed successfully${NC}"
+echo ""
+
+# Load modules at boot
+echo -e "${YELLOW}Configuring modules to load at boot...${NC}"
+grep -q "^snd-soc-wm8960$" /etc/modules || echo "snd-soc-wm8960" >> /etc/modules
+grep -q "^snd-soc-wm8960-soundcard$" /etc/modules || echo "snd-soc-wm8960-soundcard" >> /etc/modules
+echo -e "${GREEN}Module configuration complete${NC}"
+echo ""
+
+# Configure /boot/config.txt
+echo -e "${YELLOW}Configuring ${CONFIG}...${NC}"
+
+# Enable I2C
+sed -i -e 's/^#dtparam=i2c_arm=on/dtparam=i2c_arm=on/g' $CONFIG
+grep -q "^dtparam=i2c_arm=on" $CONFIG || echo "dtparam=i2c_arm=on" >> $CONFIG
+
+# Enable I2S
+grep -q "^dtparam=i2s=on" $CONFIG || echo "dtparam=i2s=on" >> $CONFIG
+
+# Add wm8960-soundcard overlay
+# Remove old seeed-2mic-voicecard overlay if present
+sed -i '/^dtoverlay=seeed-2mic-voicecard/d' $CONFIG
+
+# Add wm8960-soundcard overlay if not already present
+grep -q "^dtoverlay=wm8960-soundcard" $CONFIG || echo "dtoverlay=wm8960-soundcard" >> $CONFIG
+
+echo -e "${GREEN}Boot configuration complete${NC}"
+echo ""
+
+# Install ALSA configuration
+echo -e "${YELLOW}Installing ALSA configuration...${NC}"
+mkdir -p /etc/voicecard
+if [ -f "wm8960_asound.state" ]; then
+    cp -v wm8960_asound.state /etc/voicecard/
+    echo -e "${GREEN}ALSA state file installed${NC}"
+fi
+echo ""
+
+# Verify I2C tools
+echo -e "${YELLOW}Verifying I2C configuration...${NC}"
+if which i2cdetect &>/dev/null; then
+    echo -e "${GREEN}i2c-tools installed${NC}"
+else
+    echo -e "${YELLOW}Warning: i2c-tools not found${NC}"
+fi
+echo ""
+
+echo -e "${GREEN}======================================${NC}"
+echo -e "${GREEN}Installation Complete!${NC}"
+echo -e "${GREEN}======================================${NC}"
+echo ""
+echo -e "${YELLOW}Post-Installation Instructions:${NC}"
+echo ""
+echo -e "1. ${GREEN}Reboot your Raspberry Pi:${NC}"
+echo -e "   ${YELLOW}sudo reboot${NC}"
+echo ""
+echo -e "2. ${GREEN}After reboot, verify the WM8960 is detected on I2C:${NC}"
+echo -e "   ${YELLOW}sudo i2cdetect -y 1${NC}"
+echo -e "   (You should see device at address 0x1a)"
+echo ""
+echo -e "3. ${GREEN}Check if sound card is loaded:${NC}"
+echo -e "   ${YELLOW}aplay -l${NC}"
+echo -e "   (You should see 'wm8960-soundcard')"
+echo ""
+echo -e "4. ${GREEN}Check loaded kernel modules:${NC}"
+echo -e "   ${YELLOW}lsmod | grep wm8960${NC}"
+echo ""
+echo -e "5. ${GREEN}Test audio playback:${NC}"
+echo -e "   ${YELLOW}speaker-test -t wav -c 2${NC}"
+echo ""
+echo -e "6. ${GREEN}Test audio recording:${NC}"
+echo -e "   ${YELLOW}arecord -D hw:0,0 -f S16_LE -r 48000 -c 2 test.wav${NC}"
+echo ""
+echo -e "${GREEN}For more information, visit:${NC}"
+echo -e "${YELLOW}https://wiki.seeedstudio.com/ReSpeaker_2_Mics_Pi_HAT/${NC}"
+echo ""
+echo -e "${GREEN}Enjoy your WM8960 soundcard!${NC}"
+echo -e "${GREEN}======================================${NC}"
