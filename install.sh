@@ -71,9 +71,14 @@ apt-get install -y dkms git i2c-tools device-tree-compiler
 
 # Install kernel headers
 echo -e "${YELLOW}Installing kernel headers...${NC}"
-apt-get install -y raspberrypi-kernel-headers linux-headers-${uname_r} 2>/dev/null || \
-apt-get install -y raspberrypi-kernel-headers 2>/dev/null || \
-echo -e "${YELLOW}Warning: Could not install kernel headers package, using existing headers${NC}"
+if apt-get install -y raspberrypi-kernel-headers 2>/dev/null; then
+    echo -e "${GREEN}Installed raspberrypi-kernel-headers${NC}"
+elif apt-get install -y linux-headers-${uname_r} 2>/dev/null; then
+    echo -e "${GREEN}Installed linux-headers-${uname_r}${NC}"
+else
+    echo -e "${YELLOW}Warning: Could not install kernel headers package${NC}"
+    echo -e "${YELLOW}Checking if headers already exist...${NC}"
+fi
 
 # Verify kernel headers are available
 if [ ! -d "/lib/modules/${uname_r}/build" ]; then

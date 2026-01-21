@@ -20,26 +20,7 @@ static int wm8960_soundcard_hw_params(struct snd_pcm_substream *substream,
 	struct snd_soc_pcm_runtime *rtd = substream->private_data;
 	struct snd_soc_dai *codec_dai = asoc_rtd_to_codec(rtd, 0);
 	struct snd_soc_dai *cpu_dai = asoc_rtd_to_cpu(rtd, 0);
-	unsigned int sample_rate = params_rate(params);
-	unsigned int pll_out;
 	int ret;
-
-	/* WM8960 PLL configuration */
-	switch (sample_rate) {
-	case 8000:
-	case 16000:
-	case 32000:
-	case 48000:
-		pll_out = 12288000;
-		break;
-	case 11025:
-	case 22050:
-	case 44100:
-		pll_out = 11289600;
-		break;
-	default:
-		return -EINVAL;
-	}
 
 	/* Set codec DAI configuration */
 	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_I2S |
@@ -118,10 +99,12 @@ static int wm8960_soundcard_probe(struct platform_device *pdev)
 	wm8960_soundcard_dai[0].codecs->of_node = codec_node;
 
 	ret = devm_snd_soc_register_card(&pdev->dev, card);
+	
+	of_node_put(cpu_node);
+	of_node_put(codec_node);
+	
 	if (ret) {
 		dev_err(&pdev->dev, "Failed to register card: %d\n", ret);
-		of_node_put(cpu_node);
-		of_node_put(codec_node);
 		return ret;
 	}
 

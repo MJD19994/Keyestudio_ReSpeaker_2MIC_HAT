@@ -41,7 +41,7 @@
 	fragment@3 {
 		target-path = "/";
 		__overlay__ {
-			sound {
+			wm8960_soundcard: sound {
 				compatible = "wm8960-soundcard";
 				i2s-controller = <&i2s>;
 				audio-codec = <&wm8960>;
