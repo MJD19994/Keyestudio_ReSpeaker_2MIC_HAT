@@ -1,1 +1,0 @@
-/home/runner/work/Keyestudio_ReSpeaker_2MIC_HAT/Keyestudio_ReSpeaker_2MIC_HAT/wm8960.o

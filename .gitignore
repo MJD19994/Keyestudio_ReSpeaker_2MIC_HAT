@@ -1,0 +1,24 @@
+# Kernel module build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.mod.o
+.*.cmd
+.*.d
+*.order
+*.symvers
+modules.builtin
+Module.symvers
+
+# CodeQL artifacts
+_codeql_detected_source_root
+
+# Temporary files
+*~
+*.swp
+*.swo
+.tmp_versions/
+
+# Build directories
+.cache/
