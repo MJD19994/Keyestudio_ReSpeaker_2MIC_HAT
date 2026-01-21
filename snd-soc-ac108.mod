@@ -1,0 +1,2 @@
+/home/runner/work/Keyestudio_ReSpeaker_2MIC_HAT/Keyestudio_ReSpeaker_2MIC_HAT/ac108.o
+/home/runner/work/Keyestudio_ReSpeaker_2MIC_HAT/Keyestudio_ReSpeaker_2MIC_HAT/ac101.o
