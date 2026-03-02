@@ -1,13 +1,131 @@
-# seeed-voicecard
+# WM8960 Soundcard Driver for Raspberry Pi
 
-The drivers for [ReSpeaker Mic Hat](https://www.seeedstudio.com/ReSpeaker-2-Mics-Pi-HAT-p-2874.html), [ReSpeaker 4 Mic Array](https://www.seeedstudio.com/ReSpeaker-4-Mic-Array-for-Raspberry-Pi-p-2941.html), [6-Mics Circular Array Kit](), and [4-Mics Linear Array Kit]() for Raspberry Pi.
+Kernel 6.12+ compatible drivers for [ReSpeaker 2-Mics Pi HAT](https://www.seeedstudio.com/ReSpeaker-2-Mics-Pi-HAT-p-2874.html) with WM8960 codec.
 
-### Install seeed-voicecard
-Get the seeed voice card source code and install all linux kernel drivers
+## Compatibility
+
+This driver is compatible with:
+- **Raspberry Pi OS Trixie (Kernel 6.12+)** - **NEW!**
+- Raspberry Pi 3 (all models)
+- Raspberry Pi 4 (all models)
+- Raspberry Pi 5
+- 32-bit and 64-bit Raspberry Pi OS
+
+**Note:** For older kernel versions (< 6.12), please refer to the original seeed-voicecard repository.
+
+## Features
+
+- Kernel 6.12+ compatible implementation
+- DKMS support for automatic rebuild on kernel updates
+- Simple-audio-card based architecture
+- I2C communication with WM8960 codec (address 0x1a)
+- Full duplex audio (playback and capture)
+- Automatic device tree overlay loading
+
+## Installation
+
+### Quick Installation
+
 ```bash
-git clone https://github.com/respeaker/seeed-voicecard
-cd seeed-voicecard
+git clone https://github.com/MJD19994/Keyestudio_ReSpeaker_2MIC_HAT
+cd Keyestudio_ReSpeaker_2MIC_HAT
 sudo ./install.sh
+sudo reboot
+```
+
+### What the Installation Script Does
+
+1. Installs required packages (dkms, i2c-tools, device-tree-compiler)
+2. Builds the WM8960 kernel modules using DKMS:
+   - `snd-soc-wm8960` - WM8960 codec driver
+   - `snd-soc-wm8960-soundcard` - Sound card driver
+3. Installs the device tree overlay (`wm8960-soundcard.dtbo`)
+4. Configures `/boot/config.txt` to:
+   - Enable I2C interface
+   - Enable I2S interface
+   - Load the WM8960 soundcard overlay at boot
+5. Configures kernel modules to load automatically
+
+### Post-Installation Verification
+
+After rebooting, verify the installation:
+
+1. **Check I2C device detection:**
+   ```bash
+   sudo i2cdetect -y 1
+   ```
+   You should see the WM8960 at address `0x1a`.
+
+2. **Check sound card:**
+   ```bash
+   aplay -l
+   ```
+   You should see `wm8960-soundcard` listed.
+
+3. **Check loaded modules:**
+   ```bash
+   lsmod | grep wm8960
+   ```
+   Both `snd_soc_wm8960` and `snd_soc_wm8960_soundcard` should be loaded.
+
+4. **Test playback:**
+   ```bash
+   speaker-test -t wav -c 2
+   ```
+
+5. **Test recording:**
+   ```bash
+   arecord -D hw:0,0 -f S16_LE -r 48000 -c 2 -d 5 test.wav
+   aplay test.wav
+   ```
+
+## Troubleshooting
+
+### Module Not Loading
+
+If the modules don't load automatically after reboot:
+
+```bash
+sudo modprobe snd-soc-wm8960
+sudo modprobe snd-soc-wm8960-soundcard
+```
+
+### Check dmesg for Errors
+
+```bash
+dmesg | grep -i wm8960
+dmesg | grep -i soundcard
+```
+
+### Rebuild Modules
+
+If you update your kernel, DKMS should automatically rebuild the modules. If not:
+
+```bash
+sudo dkms build -m wm8960-soundcard -v 1.0
+sudo dkms install -m wm8960-soundcard -v 1.0
+```
+
+## Manual Build (for developers)
+
+Build the modules manually:
+
+```bash
+make clean
+make
+sudo make install
+```
+
+Build the device tree overlay:
+
+```bash
+./build-dtbo.sh
+```
+
+## Uninstallation
+
+```bash
+sudo ./uninstall.sh
 sudo reboot
 ```
 ## ReSpeaker Documentation

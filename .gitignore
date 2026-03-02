@@ -1,0 +1,28 @@
+# Build artifacts
+*.o
+*.ko
+*.mod
+*.mod.c
+*.cmd
+.tmp_versions/
+modules.order
+Module.symvers
+*.o.d
+
+# Device tree binaries (generated from .dts files)
+# Keep pre-built .dtbo files but ignore newly built ones
+# wm8960-soundcard.dtbo
+
+# Editor and IDE files
+*~
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# CodeQL
+_codeql_detected_source_root
+
+# Backup files
+*.bak
+*.backup
